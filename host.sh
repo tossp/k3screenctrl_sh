@@ -22,7 +22,7 @@ do
 	fi
 done
 
-if [ -s "/tmp/lan_online_list.temp" ]; then
+if [ -s /tmp/lan_online_list.temp ]; then
 	cat /tmp/lan_online_list.temp
 	rm /tmp/lan_online_list.temp
 	exit 0
@@ -34,7 +34,7 @@ for ((i=0;i<${#online_list[@]};i++))
 do
 	hostname[i]=$(grep ${online_list[i]} /tmp/dhcp.leases | awk '{print $4}')
 	hostmac=${mac_online_list[i]//:/} && hostmac=${hostmac:0:6}
-	logo[i]=$(grep -i "$hostmac" /lib/k3screenctrl/oui/oui.txt | awk '{print $1}')
+	logo[i]=$(grep -i $hostmac /lib/k3screenctrl/oui/oui.txt | awk '{print $1}')
 
 	last_speed_time=$(cut -d$'\n' -f,1 /tmp/lan_speed/${online_list[i]})
 	last_speed_up=$(cut -d$'\n' -f,2 /tmp/lan_speed/${online_list[i]})
@@ -65,7 +65,7 @@ do
 done
 
 now_arp_refresh_time=$(date +%s)
-if [ -s "/tmp/arp_refresh_time" ]; then
+if [ -s /tmp/arp_refresh_time ]; then
 	last_arp_refresh_time=$(cat /tmp/arp_refresh_time)
 	if [ $(($now_arp_refresh_time - $last_arp_refresh_time)) -ge 600 ]; then
 		echo ${#online_list[@]} > /tmp/lan_online_list.temp
