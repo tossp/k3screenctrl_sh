@@ -1,87 +1,54 @@
 #!/bin/bash
 # Copyright (C) 2017 XiaoShan https://www.mivm.cn
 
-online_list=($(grep -v "0x0" /proc/net/arp | grep "br-lan" |awk '{print $1}'))
-mac_online_list=($(grep -v "0x0" /proc/net/arp | grep "br-lan" |awk '{print $4}'))
+temp_dir=/tmp/k3screenctrl
+dhcp_leases=$(uci get dhcp.@dnsmasq[0].leasefile)
+online_list_ip=($(cat $dhcp_leases | awk '{print $3}'))
+online_list_mac=($(cat $dhcp_leases | awk '{print $2}'))
+online_list_host=($(cat $dhcp_leases | awk '{print $4}'))
+oui_data=$(cat /lib/k3screenctrl/oui/oui.txt)
+last_time=$(cat $temp_dir/device_speed/time 2>/dev/null || date +%s)
+curr_time=$(date +%s)
+time_s=$(($curr_time - $last_time))
+[ $? -ne 0 -o $time_s -eq 0 ] && time_s=$(uci -q get k3screenctrl.@general[0].refresh_time || echo 2)
 
-arp_ip=($(grep "br-lan" /proc/net/arp | awk '{print $1}'))
-
-if [ -z "$(iptables --list | grep UPSP)" -a -z "$(iptables --list | grep DWSP)" ]; then
-	iptables -N UPSP
-	iptables -N DWSP
-	mkdir /tmp/lan_speed
-fi
-for ((i=0;i<${#arp_ip[@]};i++))
+for ((i=0;i<${#online_list_ip[@]};i++))
 do
-	if [ -z "$(iptables -nvx -L FORWARD | grep DWSP | grep ${arp_ip[i]})" -a -z "$(iptables -nvx -L FORWARD | grep UPSP | grep ${arp_ip[i]})" ]; then
-		iptables -I FORWARD 1 -s ${arp_ip[i]} -j UPSP
-		iptables -I FORWARD 1 -d ${arp_ip[i]} -j DWSP
-		echo $(date +%s) > /tmp/lan_speed/${arp_ip[i]}
-		echo 0 >> /tmp/lan_speed/${arp_ip[i]}
-		echo 0 >> /tmp/lan_speed/${arp_ip[i]}
-	fi
+	temp_file=$temp_dir/device_speed/${online_list_ip[i]}
+	[ -s  $temp_file ] || {
+		[ -z "$(iptables -nvx -L FORWARD | grep -w K3_SEREEN_U | grep -w ${online_list_ip[i]})" ] && iptables -I FORWARD 1 -s ${online_list_ip[i]} -j K3_SEREEN_U
+		[ -z "$(iptables -nvx -L FORWARD | grep -w K3_SEREEN_D | grep -w ${online_list_ip[i]})" ] && iptables -I FORWARD 1 -d ${online_list_ip[i]} -j K3_SEREEN_D
+		echo -e "0\n0" > $temp_file
+	}
 done
 
-if [ -s /tmp/lan_online_list.temp ]; then
-	cat /tmp/lan_online_list.temp
-	rm /tmp/lan_online_list.temp
-	exit 0
-else
-	echo ${#online_list[@]}
-fi
+curr_speed_u_ipt=$(iptables -nvx -L FORWARD | grep -w K3_SEREEN_U)
+curr_speed_d_ipt=$(iptables -nvx -L FORWARD | grep -w K3_SEREEN_D)
+online_code_data=$(cat $temp_dir/device_online)
+device_custom_data=$(cat $temp_dir/device_custom)
 
-for ((i=0;i<${#online_list[@]};i++))
+for ((i=0;i<${#online_list_ip[@]};i++))
 do
-	hostname[i]=$(grep ${online_list[i]} /tmp/dhcp.leases | awk '{print $4}')
-	hostmac=${mac_online_list[i]//:/} && hostmac=${hostmac:0:6}
-	logo[i]=$(grep -i $hostmac /lib/k3screenctrl/oui/oui.txt | awk '{print $1}')
-
-	last_speed_time=$(cut -d$'\n' -f,1 /tmp/lan_speed/${online_list[i]})
-	last_speed_up=$(cut -d$'\n' -f,2 /tmp/lan_speed/${online_list[i]})
-	last_speed_dw=$(cut -d$'\n' -f,3 /tmp/lan_speed/${online_list[i]})
-	now_speed_time=$(date +%s)
-	now_speed_up=$(iptables -nvx -L FORWARD | grep UPSP | grep ${online_list[i]}  | awk '{print $2}')
-	now_speed_dw=$(iptables -nvx -L FORWARD | grep DWSP | grep ${online_list[i]}  | awk '{print $2}')
-	time_s=$(($now_speed_time - $last_speed_time))
-	if [ $time_s -eq 0 ];then
-		time_s=1
-	fi
-	up_sp[i]=$((($now_speed_up - $last_speed_up) / $time_s))
-	dw_sp[i]=$((($now_speed_dw - $last_speed_dw) / $time_s))
-	echo $now_speed_time > /tmp/lan_speed/${online_list[i]}
-	echo $now_speed_up >> /tmp/lan_speed/${online_list[i]}
-	echo $now_speed_dw >> /tmp/lan_speed/${online_list[i]}
-
-	if [ -z "${hostname[i]}" -o "${hostname[i]}" = "*" ]; then
-		hostname[i]="Unknown"
-	fi
-	if [ -z "${logo[i]}" ]; then
-		logo[i]="0"
-	fi
-	echo "${hostname[i]}"
-	echo "${dw_sp[i]}"
-	echo "${up_sp[i]}"
-	echo "${logo[i]}"
+	online_code=$(echo -e "$online_code_data" | grep ${online_list_ip[i]} | awk '{print $2}') && [ -z "$online_code" ] && online_code=0
+	[ $online_code -ne 0 ] && continue
+	hostmac=${online_list_mac[i]//:/}
+	temp_file=$temp_dir/device_speed/${online_list_ip[i]}
+	device_custom=($(echo -e "$device_custom_data" |grep -w -i ${online_list_mac[i]}))
+	name=${device_custom[1]=${online_list_host[i]}}
+	logo=${device_custom[2]=$(echo -e "$oui_data" | grep -w -i ${hostmac:0:6} | awk '{print $1}')}
+	[ "$name" = "?" ] && name=${online_list_host[i]} && [ "$name" = "*" -o -z "$name" ] && name="Unknown"
+	last_data=($(cat $temp_file))
+	last_speed_u=${last_data[0]}
+	last_speed_d=${last_data[1]}
+	curr_speed_u=$(echo -e "$curr_speed_u_ipt" | grep -w ${online_list_ip[i]}  | awk '{print $2}')
+	curr_speed_d=$(echo -e "$curr_speed_d_ipt" | grep -w ${online_list_ip[i]}  | awk '{print $2}')
+	up=$(((${curr_speed_u} - $last_speed_u) / $time_s))
+	dp=$((($curr_speed_d - $last_speed_d) / $time_s))
+	temp_data="$name\n$dp\n$up\n${logo:=0}\n"
+	data=${data}${temp_data}
+	x=$(($x + 1))
+	echo -e "$curr_speed_u\n$curr_speed_d" > $temp_file
 done
-
-now_arp_refresh_time=$(date +%s)
-if [ -s /tmp/arp_refresh_time ]; then
-	last_arp_refresh_time=$(cat /tmp/arp_refresh_time)
-	if [ $(($now_arp_refresh_time - $last_arp_refresh_time)) -ge 600 ]; then
-		echo ${#online_list[@]} > /tmp/lan_online_list.temp
-		for ((i=0;i<${#online_list[@]};i++))
-		do
-			arp -d ${online_list[i]}
-			echo "${hostname[i]}" >> /tmp/lan_online_list.temp
-			echo "${dw_sp[i]}" >> /tmp/lan_online_list.temp
-			echo "${up_sp[i]}" >> /tmp/lan_online_list.temp
-			echo "${logo[i]}" >> /tmp/lan_online_list.temp
-		done
-		echo 0 >> /tmp/lan_online_list.temp
-		echo $now_arp_refresh_time > /tmp/arp_refresh_time
-	fi
-else
-	echo $now_arp_refresh_time > /tmp/arp_refresh_time
-fi
-
-echo 0
+echo ${x=0}
+echo -e "${data=""}"
+echo $curr_time > $temp_dir/device_speed/time

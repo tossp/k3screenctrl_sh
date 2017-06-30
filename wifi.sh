@@ -19,9 +19,7 @@ print_wifi_info() {
 
     echo $ssid
 
-    hide=$(uci get k3screenctrl.@general[0].pawd_hide) 
-
-    if [ $hide -eq 1 ]; then
+    if [ $(uci get k3screenctrl.@general[0].psk_hide) -eq 1 ]; then
         echo $psk | sed 's/./*/g'
     else
         echo $psk
